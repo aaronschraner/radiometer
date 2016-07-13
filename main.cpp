@@ -2,7 +2,13 @@
 #include "shift166.h"
 #include "common.h"
 #include "radioArray.h"
+#include "logger.h"
 #include <iomanip>
+#include <sstream>
+
+#ifndef DEFAULT_LOG_PATH
+#define DEFAULT_LOG_PATH "radiation.log"
+#endif
 
 using namespace std;
 
@@ -13,7 +19,8 @@ void bindisp(byte value)
 		cout << (value & x ? '1' : '0');
 }
 
-int main()
+//TODO: de-crappify
+int main(int argc, char* argv[])
 {
 	//setup wiringPi
 	if(wiringPiSetup() == -1)
@@ -25,8 +32,39 @@ int main()
 
 	RadioArray geiger(2, 3, 4, vDataPins);
 	geiger.init();
+	
+	Logger countLog;
+	const char* filename = argc > 1 ? argv[1] : DEFAULT_LOG_PATH;
+	try
+	{
+		countLog.open(filename);
+	}
+	catch (Logger::Exception e)
+	{
+		switch(e)
+		{
+			case Logger::_openFailed:
+				//TODO: handle more gracefully
+				cout << "Failed to open logfile. Exiting." << endl;
+				return -1;
+			case Logger::_alreadyOpen:
+				cout << "Warning: log file appears to already be open." << endl;
+				break;
+			default:
+				cout << "Unknown exception occurred when opening logfile." << endl;
+		}
+	}
 
-	const int FLUSH_PERIOD = 60000; //milliseconds
+	stringstream ss;
+	//    [          ]
+	ss << "          ";
+	for(int i=0; i<geiger.numShifters(); i++)
+	{
+		ss << setw(2) << right << vDataPins[i] <<   "/A      " <<
+			setw(2) << right << vDataPins[i] << "/B      ";
+	}
+	countLog.note(ss.str());
+	const int FLUSH_PERIOD = 60*1000; //milliseconds
 	//continuously display the value of the counters
 	while(true)
 	{
@@ -48,50 +86,24 @@ int main()
 		cout << " { ";
 		for(int k = 0; k < geiger.numCounters(); k++)
 			cout << counts[k] << "  ";
-		cout << setw(10 * geiger.numCounters()) << left << " } " << endl;
-
-	}
-	return 0;
-}
-
-
-/*
-int oldmain()
-{
-	//setup wiringPi
-	if(wiringPiSetup() == -1)
-		return -1;
-
-	//create shift register object and initialize pins
-	Shift166 myShift(2, 3, 0);
-	myShift.init();
-
-	byte result;
-	int lastresult = -1;
-
-	//continuously display the value of the two counters
-	while(true)
-	{
-		//load the values from the outside world
-		myShift.load();
-
-		//pull them into the pi and out of the SR
-		result = myShift.fetch();
-
-		if(result != lastresult)
+		cout << setw(10 * geiger.numCounters()) << left << " } ";
+		try
 		{
-			//display the counter values if they have updated
-			cout << "Counter 1: ";
-			bindisp(result);
-			cout << "\t" << "Counter 2: ";
-			bindisp(result >> 4);
-			cout << endl;
+			countLog.append(counts, millis());
+			cout << "[LOGGED]";
 		}
-		lastresult = result;
-		delayMicroseconds(100);
+		catch(Logger::Exception e)
+		{
+			if(e == Logger::_appendFailed)
+				cout << "[LOG ERROR]";
+			else
+				cout << "[UNKNOWN ERROR]";
+		}
+		cout << endl;
+
+
 	}
 	return 0;
 }
 
 
-*/
